@@ -8,6 +8,8 @@ use std::thread;
 use std::time::Duration;
 use tauri::{command, AppHandle, Runtime, State, Window};
 
+const CHURRO_PORT_VID: u16 = 0x1be2;
+
 /// `get_worksheet` 根据 `path` 和 `sheet_name` 获取文件 sheet 实例。
 fn get_serialport<T, F: FnOnce(&mut SerialportInfo) -> Result<T, Error>>(
     state: State<'_, SerialportState>,
@@ -17,11 +19,9 @@ fn get_serialport<T, F: FnOnce(&mut SerialportInfo) -> Result<T, Error>>(
     match state.serialports.lock() {
         Ok(mut map) => match map.get_mut(&path) {
             Some(serialport_info) => f(serialport_info),
-            None => {
-                Err(Error::String("未找到串口".to_string()))
-            }
+            None => Err(Error::String("未找到串口".to_string())),
         },
-        Err(error) =>  Err(Error::String(format!("获取文件锁失败! {} ", error))),
+        Err(error) => Err(Error::String(format!("获取文件锁失败! {} ", error))),
     }
 }
 
@@ -92,7 +92,16 @@ fn get_stop_bits(value: Option<usize>) -> StopBits {
 #[command]
 pub fn available_ports() -> Vec<String> {
     let mut list = match serialport::available_ports() {
-        Ok(list) => list,
+        Ok(list) => list
+            .iter()
+            .filter_map(|port| match &port.port_type {
+                serialport::SerialPortType::UsbPort(p) => match p.vid {
+                    CHURRO_PORT_VID => Some(port.clone()),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect(),
         Err(_) => vec![],
     };
     list.sort_by(|a, b| a.port_name.cmp(&b.port_name));
@@ -147,9 +156,7 @@ pub fn close<R: Runtime>(
                 Err(Error::String(format!("串口 {} 未打开!", &path)))
             }
         }
-        Err(error) => {
-            Err(Error::String(format!("获取锁失败: {}", error)))
-        }
+        Err(error) => Err(Error::String(format!("获取锁失败: {}", error))),
     }
 }
 
@@ -176,9 +183,7 @@ pub fn close_all<R: Runtime>(
             map.clear();
             Ok(())
         }
-        Err(error) => {
-            Err(Error::String(format!("获取锁失败: {}", error)))
-        }
+        Err(error) => Err(Error::String(format!("获取锁失败: {}", error))),
     }
 }
 
@@ -208,9 +213,7 @@ pub fn force_close<R: Runtime>(
                 Ok(())
             }
         }
-        Err(error) => {
-            Err(Error::String(format!("获取锁失败: {}", error)))
-        }
+        Err(error) => Err(Error::String(format!("获取锁失败: {}", error))),
     }
 }
 
@@ -251,14 +254,11 @@ pub fn open<R: Runtime>(
                 }
                 Err(error) => Err(Error::String(format!(
                     "创建串口 {} 失败: {}",
-                    path,
-                    error.description
+                    path, error.description
                 ))),
             }
         }
-        Err(error) => {
-            Err(Error::String(format!("获取锁失败: {}", error)))
-        }
+        Err(error) => Err(Error::String(format!("获取锁失败: {}", error))),
     }
 }
 
@@ -339,18 +339,15 @@ pub fn write<R: Runtime>(
     path: String,
     value: String,
 ) -> Result<usize, Error> {
-    get_serialport(state, path.clone(), |serialport_info| {
-        match serialport_info.serialport.write(value.as_bytes()) {
-            Ok(size) => {
-                Ok(size)
-        }
-            Err(error) => {
-                Err(Error::String(format!(
-                    "写入串口 {} 数据失败: {}",
-                    &path, error
-                )))
-            }
-        }
+    get_serialport(state, path.clone(), |serialport_info| match serialport_info
+        .serialport
+        .write(value.as_bytes())
+    {
+        Ok(size) => Ok(size),
+        Err(error) => Err(Error::String(format!(
+            "写入串口 {} 数据失败: {}",
+            &path, error
+        ))),
     })
 }
 
@@ -367,14 +364,10 @@ pub fn write_binary<R: Runtime>(
         .serialport
         .write(&value)
     {
-        Ok(size) => {
-            Ok(size)
-        }
-        Err(error) => {
-            Err(Error::String(format!(
-                "写入串口 {} 数据失败: {}",
-                &path, error
-            )))
-        }
+        Ok(size) => Ok(size),
+        Err(error) => Err(Error::String(format!(
+            "写入串口 {} 数据失败: {}",
+            &path, error
+        ))),
     })
 }
